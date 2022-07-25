@@ -298,8 +298,7 @@ export class WebExtensionBlocker extends FiltersEngine {
     browser: Browser,
     msg: IBackgroundCallback & { action?: string },
     sender: Runtime.MessageSender,
-    sendResponse: (response?: IMessageFromBackground) => void,
-  ): Promise<void> => {
+  ): Promise<IMessageFromBackground | undefined> => {
     const promises: Promise<void>[] = [];
 
     // Make sure we only listen to messages coming from our content-script
@@ -361,6 +360,8 @@ export class WebExtensionBlocker extends FiltersEngine {
       );
     }
 
+    let response: IMessageFromBackground | undefined = undefined;
+
     // Separately, requests cosmetics which depend on the page it self
     // (either because of the hostname or content of the DOM). Content script
     // logic is responsible for returning information about lists of classes,
@@ -396,16 +397,17 @@ export class WebExtensionBlocker extends FiltersEngine {
 
       // Inject scripts from content script
       if (scripts.length !== 0) {
-        sendResponse({
+        response = {
           active,
           extended,
           scripts,
           styles: '',
-        });
+        };
       }
     }
 
     await Promise.all(promises);
+    return response;
   };
 
   /**
@@ -451,9 +453,7 @@ export class WebExtensionBlocker extends FiltersEngine {
     msg: IBackgroundCallback & { action?: string },
     sender: Runtime.MessageSender,
   ): Promise<IMessageFromBackground | undefined> => {
-    return new Promise((resolve, reject) => {
-      this.handleRuntimeMessage(browser, msg, sender, resolve).catch(reject);
-    });
+    return this.handleRuntimeMessage(browser, msg, sender);
   };
 
   private async injectStylesWebExtension(
