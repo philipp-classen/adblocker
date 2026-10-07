@@ -11,7 +11,7 @@ import type { IMessageFromBackground } from '@ghostery/adblocker-content';
 import { compactTokens, concatTypedArrays } from '../../compact-set.js';
 import Config from '../../config.js';
 import { StaticDataView } from '../../data-view.js';
-import CosmeticFilter, { DEFAULT_HIDING_STYLE } from '../../filters/cosmetic.js';
+import CosmeticFilter, { DEFAULT_HIDING_STYLE, HostnameMatch } from '../../filters/cosmetic.js';
 import {
   getEntityHashesFromLabelsBackward,
   getHostnameHashesFromLabelsBackward,
@@ -375,6 +375,7 @@ export default class CosmeticFilterBucket {
       ),
     ]);
     const filters: CosmeticFilter[] = [];
+    const unhides: CosmeticFilter[] = [];
 
     // =======================================================================
     // Rules: hostname-specific
@@ -385,12 +386,21 @@ export default class CosmeticFilterBucket {
         // A hostname-specific filter is considered if it's a scriptlet (not
         // impacted by disabling of specific filters) or specific hides are
         // allowed.
-        if (
-          (allowSpecificHides === true || filter.isScriptInject() === true) &&
-          filter.match(hostname, domain, ancestors) &&
-          !isFilterExcluded?.(filter)
-        ) {
+        if (allowSpecificHides === false && filter.isScriptInject() === false) {
+          return true;
+        }
+
+        const match = filter.matchHostnames(hostname, domain, ancestors);
+        if (match === HostnameMatch.NONE || isFilterExcluded?.(filter)) {
+          return true;
+        }
+
+        if (match === HostnameMatch.INCLUDED) {
           filters.push(filter);
+        } else if (filter.isScriptInject() === true) {
+          // `foo.com,~bar.com##+js(...)` also cancels the same scriptlet from
+          // other filters on bar.com.
+          unhides.push(filter);
         }
         return true;
       });
@@ -449,8 +459,6 @@ export default class CosmeticFilterBucket {
         },
       );
     }
-
-    const unhides: CosmeticFilter[] = [];
 
     // If we found at least one candidate, check if we have unhidden rules,
     // apply them and dispatch rules into `injections` (i.e.: '+js(...)'),

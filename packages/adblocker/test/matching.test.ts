@@ -11,7 +11,7 @@ import 'mocha';
 
 import { getDomain } from 'tldts-experimental';
 
-import CosmeticFilter from '../src/filters/cosmetic.js';
+import CosmeticFilter, { HostnameMatch } from '../src/filters/cosmetic.js';
 import NetworkFilter, { isAnchoredByHostname } from '../src/filters/network.js';
 
 import { f } from '../src/lists.js';
@@ -568,14 +568,33 @@ describe('#CosmeticFilter.match', () => {
       .but.not.to.matchHostnameWithAncestors('foo.com', ['bar.com'])
       .not.to.matchHostname('bar.com');
 
-    // Only negated entries: generic without `>>`, never a match with `>>`
-    expect(f`~foo.com#@#+js(foo)`)
-      .to.matchHostname('bar.com')
-      .but.not.to.matchHostname('foo.com');
-    expect(f`~foo.com>>#@#+js(foo)`)
-      .not.to.matchHostname('bar.com')
-      .not.to.matchHostnameWithAncestors('bar.com', ['baz.com'])
-      .not.to.matchHostnameWithAncestors('bar.com', ['foo.com']);
+    // Exceptions ignore negated entries
+    expect(f`foo.com,~sub.foo.com#@#+js(foo)`)
+      .to.matchHostname('foo.com')
+      .to.matchHostname('sub.foo.com');
+    expect(f`foo.com>>,~bar.com#@#+js(foo)`).to.matchHostnameWithAncestors('bar.com', ['foo.com']);
+    expect(f`foo.com,~bar.com>>#@#+js(foo)`).to.matchHostnameWithAncestors('foo.com', ['bar.com']);
+  });
+
+  it('matchHostnames', () => {
+    const matchHostnames = (filter: string, hostname: string, ancestors: string[] = []) =>
+      CosmeticFilter.parse(filter)!.matchHostnames(
+        hostname,
+        getDomain(hostname) || '',
+        ancestors.map((ancestor) => ({ hostname: ancestor, domain: getDomain(ancestor) || '' })),
+      );
+
+    expect(matchHostnames('foo.com,~bar.com##+js(foo)', 'foo.com')).to.equal(
+      HostnameMatch.INCLUDED,
+    );
+    expect(matchHostnames('foo.com,~bar.com##+js(foo)', 'baz.com')).to.equal(HostnameMatch.NONE);
+    expect(matchHostnames('foo.com,~bar.com##+js(foo)', 'sub.bar.com')).to.equal(
+      HostnameMatch.EXCLUDED,
+    );
+    expect(matchHostnames('foo.com,~bar.com>>##+js(foo)', 'baz.com', ['bar.com'])).to.equal(
+      HostnameMatch.EXCLUDED,
+    );
+    expect(matchHostnames('foo.com,~bar.com>>##+js(foo)', 'bar.com')).to.equal(HostnameMatch.NONE);
   });
 
   it('entity', () => {

@@ -2078,6 +2078,25 @@ describe('Cosmetic filters', () => {
     });
   });
 
+  it('ignores negated hostnames of unhide', () => {
+    cosmetic('foo.com,~bar.foo.com#@#selector', {
+      ...DEFAULT_COSMETIC_FILTER,
+      domains: {
+        hostnames: h(['foo.com']),
+        entities: undefined,
+        notHostnames: undefined,
+        notEntities: undefined,
+        parts: undefined,
+      },
+      isUnhide: true,
+      selector: 'selector',
+    });
+    cosmetic('~foo.com#@#selector', null);
+    cosmetic('~foo.*#@#selector', null);
+    cosmetic('~foo.com#@#+js(script.js)', null);
+    cosmetic('~foo.com>>#@#+js(script.js)', null);
+  });
+
   describe('+js()', () => {
     it('parses script inject', () => {
       cosmetic('foo.com##+js(script.js, argument)', {
