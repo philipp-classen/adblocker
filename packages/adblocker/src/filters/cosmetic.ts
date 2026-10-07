@@ -152,6 +152,20 @@ const enum COSMETICS_MASK {
   extended = 1 << 6,
 }
 
+export const enum HostnameMatch {
+  NONE,
+  INCLUDED,
+  EXCLUDED,
+}
+
+function pushTokens(tokens: Uint32Array[], hashes: Uint32Array | undefined): void {
+  if (hashes !== undefined) {
+    for (const hash of hashes) {
+      tokens.push(new Uint32Array([hash]));
+    }
+  }
+}
+
 const HASH_DOMAINS_MARKER_LOW = 1;
 const HASH_DOMAINS_MARKER_HIGH = 253;
 
@@ -285,12 +299,22 @@ export default class CosmeticFilter implements IFilter {
       const domainEntries = [];
       const parentDomainEntries = [];
       for (const entry of line.slice(0, sharpIndex).split(',')) {
+        // Negated hostnames of exceptions are ignored: there is no exception
+        // to an exception.
+        if (getBit(mask, COSMETICS_MASK.unhide) && entry.charCodeAt(0) === 126 /* '~' */) {
+          continue;
+        }
+
         // each domain entry can have `>>` suffix.
         if (entry.endsWith('>>')) {
           parentDomainEntries.push(entry.slice(0, -2));
         } else {
           domainEntries.push(entry);
         }
+      }
+      // An exception with only negated hostnames has nothing to apply to.
+      if (domainEntries.length === 0 && parentDomainEntries.length === 0) {
+        return null;
       }
       if (domainEntries.length !== 0) {
         domains = Domains.parse(domainEntries.join(','), {
@@ -656,14 +680,26 @@ export default class CosmeticFilter implements IFilter {
     domain: string,
     ancestors?: { hostname: string; domain: string }[],
   ): boolean {
+    return this.matchHostnames(hostname, domain, ancestors) === HostnameMatch.INCLUDED;
+  }
+
+  /**
+   * Same as `match`, but also tells if a negated hostname (e.g. `~foo.com` or
+   * `~foo.com>>`) excluded the frame.
+   */
+  public matchHostnames(
+    hostname: string,
+    domain: string,
+    ancestors?: { hostname: string; domain: string }[],
+  ): HostnameMatch {
     // Not constraint on hostname, match is true
     if (this.hasHostnameConstraint() === false) {
-      return true;
+      return HostnameMatch.INCLUDED;
     }
 
     // No `hostname` available but this filter has some constraints on hostname.
     if (!hostname) {
-      return false;
+      return HostnameMatch.NONE;
     }
 
     // Negated parent hostnames (e.g. `~foo.com>>`) exclude all frames below
@@ -679,7 +715,7 @@ export default class CosmeticFilter implements IFilter {
         const parentEntityHashes = getEntityHashesFromLabelsBackward(hostname, domain);
 
         if (this.parentDomains.matchNegated(parentHostnameHashes, parentEntityHashes)) {
-          return false;
+          return HostnameMatch.EXCLUDED;
         }
 
         if (this.parentDomains.matchPositive(parentHostnameHashes, parentEntityHashes)) {
@@ -699,19 +735,21 @@ export default class CosmeticFilter implements IFilter {
       const entityHashes = getEntityHashesFromLabelsBackward(hostname, domain);
 
       if (this.domains.matchNegated(hostnameHashes, entityHashes)) {
-        return false;
+        return HostnameMatch.EXCLUDED;
       }
 
       matchDomains = this.domains.matchPositive(hostnameHashes, entityHashes);
     }
 
     if (matchParentDomains === true || matchDomains === true) {
-      return true;
+      return HostnameMatch.INCLUDED;
     }
 
     // Only negated entries (e.g. `~foo.com##.selector`): a generic filter matches
     // everywhere else. A filter with `>>` entries needs a matching ancestor.
-    return this.isGenericHide() && this.parentDomains === undefined;
+    return this.isGenericHide() && this.parentDomains === undefined
+      ? HostnameMatch.INCLUDED
+      : HostnameMatch.NONE;
   }
 
   /**
@@ -721,40 +759,20 @@ export default class CosmeticFilter implements IFilter {
   public getTokens(): Uint32Array[] {
     const tokens: Uint32Array[] = [];
 
-    // Note, we do not need to use negated domains or entities as tokens here
-    // since they will by definition not match on their own, unless accompanied
-    // by a domain or entity. Instead, they are handled in
-    // `CosmeticFilterBucket.getCosmeticsFilters(...)`.
-
-    if (this.domains !== undefined) {
-      const { hostnames, entities } = this.domains;
-
-      if (hostnames !== undefined) {
-        for (const hostname of hostnames) {
-          tokens.push(new Uint32Array([hostname]));
-        }
+    for (const domains of [this.domains, this.parentDomains]) {
+      if (domains === undefined) {
+        continue;
       }
 
-      if (entities !== undefined) {
-        for (const entity of entities) {
-          tokens.push(new Uint32Array([entity]));
-        }
-      }
-    }
+      pushTokens(tokens, domains.hostnames);
+      pushTokens(tokens, domains.entities);
 
-    if (this.parentDomains !== undefined) {
-      const { hostnames, entities } = this.parentDomains;
-
-      if (hostnames !== undefined) {
-        for (const hostname of hostnames) {
-          tokens.push(new Uint32Array([hostname]));
-        }
-      }
-
-      if (entities !== undefined) {
-        for (const entity of entities) {
-          tokens.push(new Uint32Array([entity]));
-        }
+      // Negated hostnames of a scriptlet are exceptions for the same scriptlet
+      // in other filters. Negated hostnames of other filters do not match on
+      // their own, unless accompanied by a domain or entity.
+      if (this.isScriptInject() === true) {
+        pushTokens(tokens, domains.notHostnames);
+        pushTokens(tokens, domains.notEntities);
       }
     }
 

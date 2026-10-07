@@ -1056,6 +1056,49 @@ $csp=baz,domain=bar.com
           expect(subFrameMatch?.filter?.rawLine).to.be.eql(filter);
           expect(subFrameMatch?.exception).to.be.undefined;
         });
+
+        it('handles negated hostnames as exceptions of other filters', () => {
+          const filter = 'foo.com>>##+js(script.js,arg1)';
+          const negatedHostname = 'qux.com,~bar.com##+js(script.js,arg1)';
+          const negatedAncestor = 'qux.com,~baz.com>>##+js(script.js,arg1)';
+          const otherArgs = 'bar.com##+js(script.js,arg2)';
+          const engine = Engine.parse(
+            [filter, negatedHostname, negatedAncestor, otherArgs].join('\n'),
+            { debug: true },
+          );
+          engine.resources = new Resources({
+            scriptlets: [
+              {
+                name: 'script.js',
+                aliases: [],
+                body: 'function script() {}',
+                dependencies: [],
+                executionWorld: 'MAIN',
+                requiresTrust: false,
+              },
+            ],
+          });
+          const match = (hostname: string, parentDomains: string[]) =>
+            engine
+              .matchCosmeticFilters({
+                domain: getDomain(hostname) || hostname,
+                hostname,
+                ancestors: parentDomains.map((domain) => ({ domain, hostname: domain })),
+                url: `https://${hostname}/`,
+              })
+              .matches.map(({ filter, exception }) => [filter?.rawLine, exception?.rawLine]);
+
+          expect(match('bar.com', ['foo.com'])).to.have.deep.members([
+            [filter, negatedHostname],
+            [otherArgs, undefined],
+          ]);
+          expect(match('sub.bar.com', ['foo.com'])).to.have.deep.members([
+            [filter, negatedHostname],
+            [otherArgs, undefined],
+          ]);
+          expect(match('other.com', ['baz.com', 'foo.com'])).to.eql([[filter, negatedAncestor]]);
+          expect(match('other.com', ['foo.com'])).to.eql([[filter, undefined]]);
+        });
       });
     });
 
