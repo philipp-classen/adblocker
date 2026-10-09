@@ -23,6 +23,12 @@ function includesAny(sorted: Uint32Array | undefined, hashes: Uint32Array): bool
   return false;
 }
 
+export const enum DomainMatch {
+  None,
+  Included,
+  Excluded,
+}
+
 export class Domains {
   public static parse(
     value: string | Set<string>,
@@ -249,32 +255,33 @@ export class Domains {
   }
 
   /**
-   * Check if `hostname` matches a negated hostname or entity (e.g. `~foo.com`).
+   * Negated entries take precedence: `foo.com,~sub.foo.com` excludes
+   * `sub.foo.com` even though `foo.com` also matches it.
    */
-  public matchNegated(hostnameHashes: Uint32Array, entityHashes: Uint32Array): boolean {
-    return (
-      includesAny(this.notHostnames, hostnameHashes) || includesAny(this.notEntities, entityHashes)
-    );
-  }
+  public classify(hostnameHashes: Uint32Array, entityHashes: Uint32Array): DomainMatch {
+    if (
+      includesAny(this.notHostnames, hostnameHashes) ||
+      includesAny(this.notEntities, entityHashes)
+    ) {
+      return DomainMatch.Excluded;
+    }
 
-  /**
-   * Check if `hostname` matches a non-negated hostname or entity (e.g. `foo.com`).
-   */
-  public matchPositive(hostnameHashes: Uint32Array, entityHashes: Uint32Array): boolean {
-    return includesAny(this.hostnames, hostnameHashes) || includesAny(this.entities, entityHashes);
+    if (includesAny(this.hostnames, hostnameHashes) || includesAny(this.entities, entityHashes)) {
+      return DomainMatch.Included;
+    }
+
+    return DomainMatch.None;
   }
 
   public match(hostnameHashes: Uint32Array, entityHashes: Uint32Array): boolean {
-    // Check if `hostname` is blacklisted
-    if (this.matchNegated(hostnameHashes, entityHashes)) {
-      return false;
+    switch (this.classify(hostnameHashes, entityHashes)) {
+      case DomainMatch.Excluded:
+        return false;
+      case DomainMatch.Included:
+        return true;
+      case DomainMatch.None:
+        // A generic list allows all hostnames it does not exclude.
+        return this.isSpecific() === false;
     }
-
-    // Check if `hostname` is allowed. A generic list allows all other hostnames.
-    if (this.isSpecific()) {
-      return this.matchPositive(hostnameHashes, entityHashes);
-    }
-
-    return true;
   }
 }
