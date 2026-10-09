@@ -345,8 +345,8 @@ export default class CosmeticFilter implements IFilter {
     ) {
       // Generic scriptlets are invalid, unless they are un-hide
       if (
-        !isSpecific(domains) &&
-        !isSpecific(parentDomains) &&
+        !domains?.isSpecific() &&
+        !parentDomains?.isSpecific() &&
         getBit(mask, COSMETICS_MASK.unhide) === false
       ) {
         return null;
@@ -666,9 +666,32 @@ export default class CosmeticFilter implements IFilter {
       return false;
     }
 
+    let matched = false;
+
+    if (this.domains !== undefined) {
+      // TODO - this hashing could be re-used between cosmetics by using an
+      // abstraction like `Request` (similar to network filters matching).
+      // Maybe could we reuse `Request` directly without any change?
+      const hostnameHashes = getHostnameHashesFromLabelsBackward(hostname, domain);
+      const entityHashes = getEntityHashesFromLabelsBackward(hostname, domain);
+
+      // Only negated entries (e.g. `~foo.com##.selector`): a generic filter
+      // matches everywhere else. A filter with `>>` entries never does.
+      if (this.parentDomains === undefined) {
+        return this.domains.match(hostnameHashes, entityHashes);
+      }
+
+      // Negated hostnames (e.g. `~foo.com`) exclude the frame itself. Hostnames
+      // (e.g. `foo.com`) include it.
+      if (this.domains.matchNegated(hostnameHashes, entityHashes)) {
+        return false;
+      }
+
+      matched = this.domains.matchPositive(hostnameHashes, entityHashes);
+    }
+
     // Negated parent hostnames (e.g. `~foo.com>>`) exclude all frames below
     // them. Parent hostnames (e.g. `foo.com>>`) include all frames below them.
-    let matchParentDomains = false;
     if (ancestors !== undefined && this.parentDomains !== undefined) {
       for (const { hostname, domain } of ancestors) {
         if (hostname.length === 0) {
@@ -683,35 +706,12 @@ export default class CosmeticFilter implements IFilter {
         }
 
         if (this.parentDomains.matchPositive(parentHostnameHashes, parentEntityHashes)) {
-          matchParentDomains = true;
+          matched = true;
         }
       }
     }
 
-    // Negated hostnames (e.g. `~foo.com`) exclude the frame itself. Hostnames
-    // (e.g. `foo.com`) include it.
-    let matchDomains = false;
-    if (this.domains !== undefined) {
-      // TODO - this hashing could be re-used between cosmetics by using an
-      // abstraction like `Request` (similar to network filters matching).
-      // Maybe could we reuse `Request` directly without any change?
-      const hostnameHashes = getHostnameHashesFromLabelsBackward(hostname, domain);
-      const entityHashes = getEntityHashesFromLabelsBackward(hostname, domain);
-
-      if (this.domains.matchNegated(hostnameHashes, entityHashes)) {
-        return false;
-      }
-
-      matchDomains = this.domains.matchPositive(hostnameHashes, entityHashes);
-    }
-
-    if (matchParentDomains === true || matchDomains === true) {
-      return true;
-    }
-
-    // Only negated entries (e.g. `~foo.com##.selector`): a generic filter matches
-    // everywhere else. A filter with `>>` entries needs a matching ancestor.
-    return this.isGenericHide() && this.parentDomains === undefined;
+    return matched;
   }
 
   /**
@@ -1113,10 +1113,6 @@ export default class CosmeticFilter implements IFilter {
   //
   // For example: ~example.com##.ad  is a generic filter as well!
   public isGenericHide(): boolean {
-    return !isSpecific(this.domains) && !isSpecific(this.parentDomains);
+    return !this.domains?.isSpecific() && !this.parentDomains?.isSpecific();
   }
-}
-
-function isSpecific(domains: Domains | undefined): boolean {
-  return domains?.hostnames !== undefined || domains?.entities !== undefined;
 }
