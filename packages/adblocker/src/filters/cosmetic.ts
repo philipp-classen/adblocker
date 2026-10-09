@@ -16,7 +16,7 @@ import {
   PseudoClass,
 } from '@ghostery/adblocker-extended-selectors';
 
-import { Domains } from '../engine/domains.js';
+import { DomainMatch, Domains } from '../engine/domains.js';
 import {
   EMPTY_UINT32_ARRAY,
   StaticDataView,
@@ -668,44 +668,49 @@ export default class CosmeticFilter implements IFilter {
 
     // Negated parent hostnames (e.g. `~foo.com>>`) exclude all frames below
     // them. Parent hostnames (e.g. `foo.com>>`) include all frames below them.
-    let matchParentDomains = false;
+    let included = false;
     if (ancestors !== undefined && this.parentDomains !== undefined) {
       for (const { hostname, domain } of ancestors) {
         if (hostname.length === 0) {
           continue;
         }
 
-        const parentHostnameHashes = getHostnameHashesFromLabelsBackward(hostname, domain);
-        const parentEntityHashes = getEntityHashesFromLabelsBackward(hostname, domain);
+        const match = this.parentDomains.classify(
+          getHostnameHashesFromLabelsBackward(hostname, domain),
+          getEntityHashesFromLabelsBackward(hostname, domain),
+        );
 
-        if (this.parentDomains.matchNegated(parentHostnameHashes, parentEntityHashes)) {
+        if (match === DomainMatch.Excluded) {
           return false;
         }
 
-        if (this.parentDomains.matchPositive(parentHostnameHashes, parentEntityHashes)) {
-          matchParentDomains = true;
+        if (match === DomainMatch.Included) {
+          included = true;
         }
       }
     }
 
     // Negated hostnames (e.g. `~foo.com`) exclude the frame itself. Hostnames
     // (e.g. `foo.com`) include it.
-    let matchDomains = false;
     if (this.domains !== undefined) {
       // TODO - this hashing could be re-used between cosmetics by using an
       // abstraction like `Request` (similar to network filters matching).
       // Maybe could we reuse `Request` directly without any change?
-      const hostnameHashes = getHostnameHashesFromLabelsBackward(hostname, domain);
-      const entityHashes = getEntityHashesFromLabelsBackward(hostname, domain);
+      const match = this.domains.classify(
+        getHostnameHashesFromLabelsBackward(hostname, domain),
+        getEntityHashesFromLabelsBackward(hostname, domain),
+      );
 
-      if (this.domains.matchNegated(hostnameHashes, entityHashes)) {
+      if (match === DomainMatch.Excluded) {
         return false;
       }
 
-      matchDomains = this.domains.matchPositive(hostnameHashes, entityHashes);
+      if (match === DomainMatch.Included) {
+        return true;
+      }
     }
 
-    if (matchParentDomains === true || matchDomains === true) {
+    if (included === true) {
       return true;
     }
 
