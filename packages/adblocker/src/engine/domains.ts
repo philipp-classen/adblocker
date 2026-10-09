@@ -239,16 +239,6 @@ export class Domains {
   }
 
   /**
-   * Check if the list has at least one non-negated hostname or entity.
-   *
-   * Specific: `foo.com,~sub.foo.com` (applies on foo.com, except on sub.foo.com)
-   * Generic:  `~foo.com` (applies everywhere, except on foo.com)
-   */
-  public isSpecific(): boolean {
-    return this.hostnames !== undefined || this.entities !== undefined;
-  }
-
-  /**
    * Check if `hostname` matches a negated hostname or entity (e.g. `~foo.com`).
    */
   public matchNegated(hostnameHashes: Uint32Array, entityHashes: Uint32Array): boolean {
@@ -271,7 +261,7 @@ export class Domains {
     }
 
     // Check if `hostname` is allowed. A generic list allows all other hostnames.
-    if (this.isSpecific()) {
+    if (this.hostnames !== undefined || this.entities !== undefined) {
       return this.matchPositive(hostnameHashes, entityHashes);
     }
 

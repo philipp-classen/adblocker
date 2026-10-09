@@ -345,8 +345,8 @@ export default class CosmeticFilter implements IFilter {
     ) {
       // Generic scriptlets are invalid, unless they are un-hide
       if (
-        domains?.isSpecific() !== true &&
-        parentDomains?.isSpecific() !== true &&
+        !isSpecific(domains) &&
+        !isSpecific(parentDomains) &&
         getBit(mask, COSMETICS_MASK.unhide) === false
       ) {
         return null;
@@ -1113,6 +1113,10 @@ export default class CosmeticFilter implements IFilter {
   //
   // For example: ~example.com##.ad  is a generic filter as well!
   public isGenericHide(): boolean {
-    return this.domains?.isSpecific() !== true && this.parentDomains?.isSpecific() !== true;
+    return !isSpecific(this.domains) && !isSpecific(this.parentDomains);
   }
+}
+
+function isSpecific(domains: Domains | undefined): boolean {
+  return domains?.hostnames !== undefined || domains?.entities !== undefined;
 }
